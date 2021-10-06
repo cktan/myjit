@@ -25,9 +25,10 @@ void MyJit::init()
 
 
 MyJit::MyJit(const string moduleName)
-	: m_context(std::make_unique<llvm::LLVMContext>()),
-	  m_module(std::make_unique<llvm::Module>(moduleName, *m_context))
 {
+	MyJit::init();
+	m_context = std::make_unique<llvm::LLVMContext>();
+	m_module = std::make_unique<llvm::Module>(moduleName, *m_context);
 }
 
 
