@@ -25,15 +25,15 @@ void MyJit::init()
 
 
 MyJit::MyJit(const string moduleName)
-	: context_(std::make_unique<llvm::LLVMContext>()),
-	  module_(std::make_unique<llvm::Module>(moduleName, *context_))
+	: m_context(std::make_unique<llvm::LLVMContext>()),
+	  m_module(std::make_unique<llvm::Module>(moduleName, *m_context))
 {
 }
 
 
 llvm::DataLayout* MyJit::dataLayout()
 {
-	return const_cast<llvm::DataLayout*>(&module_->getDataLayout());
+	return const_cast<llvm::DataLayout*>(&m_module->getDataLayout());
 }
 
 
@@ -42,7 +42,7 @@ bool MyJit::verify(llvm::Function* fn)
 	string errstr;
 	llvm::raw_string_ostream errstream(errstr);
 	if (llvm::verifyFunction(*fn, &errstream)) {
-		errmsg_ = "while verifying " + fn->getName().str() + " - " + errstream.str();
+		m_errmsg = "while verifying " + fn->getName().str() + " - " + errstream.str();
 		return false;
 	}
 	return true;
@@ -79,10 +79,10 @@ static void optimize(llvm::Module& M)
 
 bool MyJit::compile()
 {
-	auto& DL = module_->getDataLayout();
-	optimize(*module_);
+	auto& DL = m_module->getDataLayout();
+	optimize(*m_module);
 
-	auto M = llvm::orc::ThreadSafeModule(std::move(module_), std::move(context_));
+	auto M = llvm::orc::ThreadSafeModule(std::move(m_module), std::move(m_context));
 
 	// this is another way to run optimize on module
 	// M.withModuleDo(optimize);
@@ -91,21 +91,21 @@ bool MyJit::compile()
 	{
 		auto t = llvm::orc::LLJITBuilder().create();
 		if (!t) {
-			errmsg_ = toString(t.takeError());
+			m_errmsg = toString(t.takeError());
 			return false;
 		}
-		lljit_ = std::move(*t);
+		m_lljit = std::move(*t);
 	}
 
 	// Give module to LLJIT ... this will generate code
-	llvm::Error err = lljit_->addIRModule(std::move(M));
+	llvm::Error err = m_lljit->addIRModule(std::move(M));
 	if (err) {
-		errmsg_ = toString(std::move(err));
+		m_errmsg = toString(std::move(err));
 		return false;
 	}
 
 	// Let LLJIT lookup symbols dynamically
-    lljit_->getMainJITDylib()
+    m_lljit->getMainJITDylib()
 		.addGenerator(cantFail(llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(DL.getGlobalPrefix())));
 
 
@@ -121,42 +121,46 @@ intptr_t MyJit::lookup(llvm::Function* fn)
 
 intptr_t MyJit::lookup(const std::string fnname)
 {
-	auto sym = lljit_->lookup(fnname);
+	auto sym = m_lljit->lookup(fnname);
 	if (!sym) {
-		errmsg_ = toString(sym.takeError());
+		m_errmsg = toString(sym.takeError());
 		return 0;
 	}
 	return (intptr_t) (*sym).getAddress();
 }
 
+llvm::Function* MyJit::createFunction(const std::string name, llvm::FunctionType* type)
+{
+	return llvm::Function::Create(type,
+								  llvm::Function::ExternalLinkage,
+								  name,
+								  *m_module);
+}
+
+
+llvm::BasicBlock* MyJit::createBlock(const std::string name, llvm::Function* fn)
+{
+	return llvm::BasicBlock::Create(*m_context, name, fn);
+}
 
 
 
 llvm::Function* gen_hello(MyJit& jit)
 {
 	llvm::LLVMContext& context = *jit.context();
-	llvm::Module* module = jit.module();
 
 	// some types that we will be using
 	auto voidty = llvm::Type::getVoidTy(context);
 	auto i32ty = llvm::Type::getInt32Ty(context);
 
 	// declare function: int putchar(int)
-	auto putchar =
-		llvm::Function::Create(llvm::FunctionType::get(i32ty, {i32ty}, false),
-							   llvm::Function::ExternalLinkage,
-							   "putchar",
-							   module);
+	auto putchar = jit.createFunction("putchar", llvm::FunctionType::get(i32ty, {i32ty}, false));
 
 	// create hello()
-	auto hello =
-		llvm::Function::Create(llvm::FunctionType::get(voidty, {}, false),
-							   llvm::Function::ExternalLinkage,
-							   "hello",
-							   module);
+	auto hello = jit.createFunction("hello", llvm::FunctionType::get(voidty, {}, false));
 
 	// create first block in hello()
-	auto entry_bb = llvm::BasicBlock::Create(context, "entry", hello);
+	auto entry_bb = jit.createBlock("entry", hello);
 
 	// insert call putchar() instructions into the the block
 	llvm::IRBuilder<> builder(entry_bb);

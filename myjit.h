@@ -13,20 +13,24 @@ public:
 	static void init();
 
 	MyJit(const std::string moduleName);
-	llvm::LLVMContext* context() { return context_.get(); }
-	llvm::Module* module() { return module_.get(); }
+	llvm::LLVMContext* context() { return m_context.get(); }
+	llvm::Module* module() { return m_module.get(); }
 	llvm::DataLayout* dataLayout();
+
+	llvm::Function* createFunction(const std::string name, llvm::FunctionType* type);
+	llvm::BasicBlock* createBlock(const std::string name, llvm::Function* fn);
+
 
 	bool verify(llvm::Function* fn);
 	bool compile();
 	intptr_t lookup(llvm::Function* fn);
 	intptr_t lookup(const std::string fnname);
 
-	const char* errmsg() const { return errmsg_.c_str(); }
+	const char* errmsg() const { return m_errmsg.c_str(); }
 
 private:
-	std::unique_ptr<llvm::LLVMContext> context_;
-	std::unique_ptr<llvm::Module> module_;
-	std::unique_ptr<llvm::orc::LLJIT> lljit_;
-	std::string errmsg_;
+	std::unique_ptr<llvm::LLVMContext> m_context;
+	std::unique_ptr<llvm::Module> m_module;
+	std::unique_ptr<llvm::orc::LLJIT> m_lljit;
+	std::string m_errmsg;
 };
