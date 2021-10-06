@@ -6,7 +6,6 @@
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Utils.h"
 
-#include "llvm/IR/IRBuilder.h"
 #include <iostream>
 
 
@@ -29,6 +28,7 @@ MyJit::MyJit(const string moduleName)
 	MyJit::init();
 	m_context = std::make_unique<llvm::LLVMContext>();
 	m_module = std::make_unique<llvm::Module>(moduleName, *m_context);
+	m_builder = std::make_unique<llvm::IRBuilder<>>(*m_context);
 }
 
 
@@ -144,15 +144,22 @@ llvm::BasicBlock* MyJit::createBlock(const std::string name, llvm::Function* fn)
 	return llvm::BasicBlock::Create(*m_context, name, fn);
 }
 
+llvm::IRBuilder<>* MyJit::enter(llvm::BasicBlock* block)
+{
+	m_builder->SetInsertPoint(block);
+	return m_builder.get();
+}
+
+
 
 
 llvm::Function* gen_hello(MyJit& jit)
 {
-	llvm::LLVMContext& context = *jit.context();
+	auto builder = jit.builder();
 
 	// some types that we will be using
-	auto voidty = llvm::Type::getVoidTy(context);
-	auto i32ty = llvm::Type::getInt32Ty(context);
+	auto voidty = builder->getVoidTy();
+	auto i32ty = builder->getInt32Ty();
 
 	// declare function: int putchar(int)
 	auto putchar = jit.createFunction("putchar", llvm::FunctionType::get(i32ty, {i32ty}, false));
@@ -164,22 +171,27 @@ llvm::Function* gen_hello(MyJit& jit)
 	auto entry_bb = jit.createBlock("entry", hello);
 
 	// insert call putchar() instructions into the the block
-	llvm::IRBuilder<> builder(entry_bb);
-	for (const char* p = "hello\n"; *p; p++) {
-		llvm::Value* ch = llvm::ConstantInt::get(context, llvm::APInt(32, *p, true));
+	builder = jit.enter(entry_bb);
+	for (const char* p = "Hello and welcome to myjit.\n"; *p; p++) {
+		llvm::Value* ch = builder->getInt32(*p);
 
 		// putchar(ch)
-		builder.CreateCall(putchar, ch);
+		builder->CreateCall(putchar, ch);
 	}
 
 	// insert return instruction
-	builder.CreateRetVoid();
+	builder->CreateRetVoid();
+
+	// verify the function
+	if (!jit.verify(hello)) {
+		std::cerr << jit.errmsg() << std::endl;
+		exit(1);
+	}
 
 	// done
 	return hello;
 }
 
-using namespace std;
 
 void jit_and_run()
 {
@@ -187,13 +199,9 @@ void jit_and_run()
 	MyJit jit("myjit");
 
 	auto hello = gen_hello(jit);
-	if (!jit.verify(hello)) {
-		cerr << jit.errmsg() << endl;
-		exit(1);
-	}
 
 	if (!jit.compile()) {
-		cerr << jit.errmsg() << endl;
+		std::cerr << jit.errmsg() << std::endl;
 		exit(1);
 	}
 
