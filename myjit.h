@@ -30,7 +30,7 @@ public:
 	intptr_t lookup(llvm::Function* fn);
 	intptr_t lookup(const std::string fnname);
 
-	const char* errmsg() const { return m_errmsg.c_str(); }
+	const std::string& errmsg() const { return m_errmsg; }
 
 private:
 	std::unique_ptr<llvm::LLVMContext> m_context;
